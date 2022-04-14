@@ -248,8 +248,18 @@ BMX160_OK                  = const(0)
 BMX160_ERROR               = const(-1)
 
 # Each goes with a different sensitivity
-AccelSensitivity2Gravity_values = [16384, 8192, 4096, 2048]
-GyroSensitivity2DegPerSec_values = [16.4, 32.8, 65.6, 131.2, 262.4]
+BMX160_ACCEL_SENSE_2G                = const(16384)
+BMX160_ACCEL_SENSE_4G                = const(8192)
+BMX160_ACCEL_SENSE_8G                = const(4096)
+BMX160_ACCEL_SENSE_16G               = const(2048)
+
+BMX160_GYRO_SENSE_2000_DPS           = 262.4
+BMX160_GYRO_SENSE_1000_DPS           = 131.2
+BMX160_GYRO_SENSE_500_DPS            = 65.6
+BMX160_GYRO_SENSE_250_DPS            = 32.8
+BMX160_GYRO_SENSE_125_DPS            = 16.4
+
+
 
 BMX160_MAX_SCLK = const(10000000)
 
@@ -257,13 +267,23 @@ class BMX160_SPI:
     txbuf = bytearray(8)
     rxbuf = bytearray(8)
 
+    accel = [_, _, _]
+    accel_range = BMX160_ACCEL_RANGE_4G
+    accel_sens  = BMX160_ACCEL_SENSE_4G
+
+    gyro  = [_, _, _]
+    gyro_range = BMX160_GYRO_RANGE_125_DPS
+    gyro_sens  = BMX160_GYRO_SENSE_125_DPS
+
+    mag   = [_, _, _]
+    mag_sens  = BMX160_MAG_SENSE
+
     def __init__(self, spi, cs):
         self.spi_device = SPIDevice(spi, cs, baudrate=BMX160_MAX_SCLK, polarity=0, phase=1)
 
         self.init_accel()
         self.init_gyro()
         self.init_mag()
-
 
     def init_accel(self):
         # Set Power Mode
@@ -275,7 +295,7 @@ class BMX160_SPI:
         # Set ODR and FSR
         self.txbuf[0] = BMX160_ACCEL_CONFIG_ADDR & BMX160_SPI_WR_MASK
         self.txbuf[1] = (BMX160_ACCEL_ODR_400HZ | (BMX160_ACCEL_BW_OSR2_AVG2 << 4)) & 0x7F
-        self.txbuf[2] = BMX160_ACCEL_RANGE_2G & 0x0F
+        self.txbuf[2] = self.accel_range & 0x0F
         with self.spi_device as spi:
             spi.write(txbuf, end=3)
 
@@ -289,7 +309,7 @@ class BMX160_SPI:
         # Set ODR and FSR
         self.txbuf[0] = BMX160_GYRO_CONFIG_ADDR & BMX160_SPI_WR_MASK
         self.txbuf[1] = (BMX160_GYRO_ODR_800HZ | (BMX160_GYRO_BW_OSR4 << 4)) & 0x3F
-        self.txbuf[2] = BMX160_GYRO_RANGE_500_DPS & 0x07
+        self.txbuf[2] = self.gyro_range & 0x07
         with self.spi_device as spi:
             spi.write(txbuf, end=3)
 
@@ -300,9 +320,47 @@ class BMX160_SPI:
         with self.spi_device as spi:
             spi.write(txbuf, end=2)
 
-        # Set ODR and FSR
-        self.txbuf[0] = BMX160_GYRO_CONFIG_ADDR & BMX160_SPI_WR_MASK
-        self.txbuf[1] = BMX160_MAG_ODR_100HZ & 0x0F
+        # Set ODR
+        self.txbuf[0] = BMX160_MAG_CONFIG_ADDR & BMX160_SPI_WR_MASK
+        self.txbuf[1] = BMX160_MAG_ODR_200HZ & 0x0F
         with self.spi_device as spi:
             spi.write(txbuf, end=2)
 
+    def read_accel(self):
+        self.txbuf[0] = BMX160_ACCEL_DATA_ADDR | BMX160_SPI_RD_MASK
+        with self.spi_device as spi:
+            spi.write(txbuf, end=1)
+            spi.readinto(rxbuf, end=6)
+
+        self.accel = unpack('<hhhh', bytes(rxbuf))[0:3]
+        self.accel[0] = self.accel[0] // self.accel_sens * 9.81
+        self.accel[1] = self.accel[1] // self.accel_sens * 9.81
+        self.accel[2] = self.accel[2] // self.accel_sens * 9.81
+
+        return self.accel
+
+    def read_gyro(self):
+        self.txbuf[0] = BMX160_GYRO_DATA_ADDR | BMX160_SPI_RD_MASK
+        with self.spi_device as spi:
+            spi.write(txbuf, end=1)
+            spi.readinto(rxbuf, end=6)
+
+        self.gyro = unpack('<hhhh', bytes(rxbuf))[0:3]
+        self.gyro[0] = self.gyro[0] // self.gyro_sens
+        self.gyro[1] = self.gyro[1] // self.gyro_sens
+        self.gyro[2] = self.gyro[2] // self.gyro_sens
+
+        return self.gyro
+
+    def read_mag(self):
+        self.txbuf[0] = BMX160_MAG_DATA_ADDR | BMX160_SPI_RD_MASK
+        with self.spi_device as spi:
+            spi.write(txbuf, end=1)
+            spi.readinto(rxbuf, end=6)
+
+        self.mag = unpack('<hhhh', bytes(rxbuf))[0:3]
+        self.mag[0] = self.mag[0] // self.mag_sens
+        self.mag[1] = self.mag[1] // self.mag_sens
+        self.mag[2] = self.mag[2] // self.mag_sens
+
+        return self.mag
