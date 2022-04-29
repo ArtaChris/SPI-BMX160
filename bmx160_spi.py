@@ -29,7 +29,7 @@ BMX160_ACCEL_CONFIG_ADDR   = const(0x40)
 BMX160_ACCEL_RANGE_ADDR    = const(0x41)
 BMX160_GYRO_CONFIG_ADDR    = const(0x42)
 BMX160_GYRO_RANGE_ADDR     = const(0x43)
-BMX160_MAG_ODR_ADDR        = const(0x44)
+BMX160_MAG_CONFIG_ADDR        = const(0x44)
 
 BMX160_MAG_IF_0_ADDR       = const(0x4C)
 BMX160_MAG_IF_1_ADDR       = const(0x4D)
@@ -63,6 +63,8 @@ BMX160_INT_FLAT_1_ADDR     = const(0x68)
 BMX160_FOC_CONF_ADDR       = const(0x69)
 
 BMX160_CONF_ADDR           = const(0x6A)
+BMX160_SELF_TEST_ADDR      = const(0x6D)
+BMX160_NV_CONF_ADDR        = const(0x70)
 
 BMX160_ACCEL_BW_OSR4_AVG1   = const(0x00)
 BMX160_ACCEL_BW_OSR2_AVG2   = const(0x01)
@@ -77,7 +79,6 @@ BMX160_GYRO_BW_OSR4         = const(0x00)
 BMX160_GYRO_BW_OSR2         = const(0x01)
 BMX160_GYRO_BW_NORMAL_MODE  = const(0x02)
 
-BMX160_SELF_TEST_ADDR                = const(0x6D)
 # Self test configurations
 BMX160_ACCEL_SELF_TEST_CONFIG        = const(0x2C)
 BMX160_ACCEL_SELF_TEST_POSITIVE_EN   = const(0x0D)
@@ -252,15 +253,15 @@ BMX160_ACCEL_SENSE_4G                = const(8192)
 BMX160_ACCEL_SENSE_8G                = const(4096)
 BMX160_ACCEL_SENSE_16G               = const(2048)
 
-BMX160_GYRO_SENSE_2000_DPS           = 262.4
-BMX160_GYRO_SENSE_1000_DPS           = 131.2
+BMX160_GYRO_SENSE_2000_DPS           = 16.4
+BMX160_GYRO_SENSE_1000_DPS           = 32.8
 BMX160_GYRO_SENSE_500_DPS            = 65.6
-BMX160_GYRO_SENSE_250_DPS            = 32.8
-BMX160_GYRO_SENSE_125_DPS            = 16.4
+BMX160_GYRO_SENSE_250_DPS            = 131.2
+BMX160_GYRO_SENSE_125_DPS            = 262.4
 
 BMX160_MAG_SENSE                     = 0.0625
 
-BMX160_MAX_SCLK = const(1000000)
+BMX160_MAX_SCLK = const(4000000)
 
 class BMX160_SPI:
     txbuf = bytearray(8)
@@ -285,6 +286,21 @@ class BMX160_SPI:
         with self.spi_device as spi:
             spi.write(self.txbuf, end=2)
 
+        self.txbuf[0] = 0x7F | BMX160_SPI_RD_MASK
+        with self.spi_device as spi:
+            spi.write(self.txbuf, end=1)
+            spi.readinto(self.rxbuf, end=1)
+
+        self.txbuf[0] = BMX160_CONF_ADDR & BMX160_SPI_WR_MASK
+        self.txbuf[1] = 0x02
+        with self.spi_device as spi:
+            spi.write(self.txbuf, end=2)
+
+        self.txbuf[0] = BMX160_NV_CONF_ADDR & BMX160_SPI_WR_MASK
+        self.txbuf[1] = BMX160_SPI_INTF
+        with self.spi_device as spi:
+            spi.write(self.txbuf, end=2)
+
         self.init_accel()
         self.init_gyro()
         self.init_mag()
@@ -301,7 +317,18 @@ class BMX160_SPI:
         self.txbuf[1] = (BMX160_ACCEL_ODR_400HZ | (BMX160_ACCEL_BW_OSR2_AVG2 << 4)) & 0x7F
         self.txbuf[2] = self.accel_range & 0x0F
         with self.spi_device as spi:
-            spi.write(self.self.txbuf, end=3)
+            spi.write(self.txbuf, end=3)
+        print(bytes(self.txbuf))
+        for i in self.txbuf:
+            print("%6s" % (hex(i)), end='')
+        print('\n')
+        self.txbuf[0] = BMX160_ACCEL_CONFIG_ADDR | BMX160_SPI_RD_MASK
+        with self.spi_device as spi:
+            spi.write(self.txbuf, end=1)
+            spi.readinto(self.rxbuf, end=2)
+        for i in self.rxbuf:
+            print("%6s" % (hex(i)), end='')
+        print('\n')
 
     def init_gyro(self):
         # Set Power Mode
@@ -312,7 +339,7 @@ class BMX160_SPI:
 
         # Set ODR and FSR
         self.txbuf[0] = BMX160_GYRO_CONFIG_ADDR & BMX160_SPI_WR_MASK
-        self.txbuf[1] = (BMX160_GYRO_ODR_800HZ | (BMX160_GYRO_BW_OSR4 << 4)) & 0x3F
+        self.txbuf[1] = (BMX160_GYRO_ODR_1600HZ | (BMX160_GYRO_BW_OSR4 << 4)) & 0x3F
         self.txbuf[2] = self.gyro_range & 0x07
         with self.spi_device as spi:
             spi.write(self.txbuf, end=3)
@@ -336,7 +363,7 @@ class BMX160_SPI:
             spi.write(self.txbuf, end=1)
             spi.readinto(self.rxbuf, end=6)
 
-        self.accel[0], self.accel[1], self.accel[2] = unpack('<hhhh', bytes(self.rxbuf))[0:3]
+        self.accel[0:3] = unpack('<hhhh', bytes(self.rxbuf))[0:3]
         self.accel[0] = self.accel[0] / self.accel_sens * 9.81
         self.accel[1] = self.accel[1] / self.accel_sens * 9.81
         self.accel[2] = self.accel[2] / self.accel_sens * 9.81
