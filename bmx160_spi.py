@@ -1,9 +1,11 @@
 from adafruit_bus_device.spi_device import SPIDevice
+from adafruit_bus_device.i2c_device import I2CDevice
 from micropython import const
 try:
     from struct import unpack
 except ImportError:
     from ustruct import unpack
+from time import sleep
 
 # Chip ID
 BMX160_CHIP_ID = const(0xD8)
@@ -314,7 +316,7 @@ class BMX160_SPI:
 
         # Set ODR and FSR
         self.txbuf[0] = BMX160_ACCEL_CONFIG_ADDR & BMX160_SPI_WR_MASK
-        self.txbuf[1] = (BMX160_ACCEL_ODR_400HZ | (BMX160_ACCEL_BW_OSR2_AVG2 << 4)) & 0x7F
+        self.txbuf[1] = (BMX160_ACCEL_ODR_800HZ | (BMX160_ACCEL_BW_OSR2_AVG2 << 4)) & 0x7F
         self.txbuf[2] = self.accel_range & 0x0F
         with self.spi_device as spi:
             spi.write(self.txbuf, end=3)
@@ -339,7 +341,7 @@ class BMX160_SPI:
 
         # Set ODR and FSR
         self.txbuf[0] = BMX160_GYRO_CONFIG_ADDR & BMX160_SPI_WR_MASK
-        self.txbuf[1] = (BMX160_GYRO_ODR_1600HZ | (BMX160_GYRO_BW_OSR4 << 4)) & 0x3F
+        self.txbuf[1] = (BMX160_GYRO_ODR_800HZ | (BMX160_GYRO_BW_OSR4 << 4)) & 0x3F
         self.txbuf[2] = self.gyro_range & 0x07
         with self.spi_device as spi:
             spi.write(self.txbuf, end=3)
@@ -394,5 +396,158 @@ class BMX160_SPI:
         self.mag[1] = self.mag[1] / self.mag_sens
         self.mag[2] = self.mag[2] / self.mag_sens
 
+        return self.mag
+
+
+BMX160_DELAY = 0.001
+
+
+class BMX160_I2C:
+    txbuf = bytearray(8)
+    rxbuf = bytearray(8)
+    
+    accel = [0, 0, 0]
+    accel_range = BMX160_ACCEL_RANGE_4G
+    accel_sens = BMX160_ACCEL_SENSE_4G
+    
+    gyro = [0, 0, 0]
+    gyro_range = BMX160_GYRO_RANGE_250_DPS
+    gyro_sens = BMX160_GYRO_SENSE_250_DPS
+    
+    mag = [0, 0, 0]
+    mag_sens = BMX160_MAG_SENSE
+    
+    def __init__(self, i2c, address=BMX160_I2C_ADDR):
+        self.i2c_device = I2CDevice(i2c, address)
+        
+        sleep(BMX160_DELAY)
+        
+        self.txbuf[0] = BMX160_COMMAND_REG_ADDR
+        self.txbuf[1] = BMX160_SOFT_RESET_CMD
+        with self.i2c_device as spi:
+            spi.write(self.txbuf, end=2)
+        
+        sleep(BMX160_DELAY)
+        
+        self.txbuf[0] = 0x7F
+        with self.i2c_device as i2c:
+            i2c.write(self.txbuf, end=1)
+            i2c.readinto(self.rxbuf, end=1)
+        
+        sleep(BMX160_DELAY)
+        
+        self.txbuf[0] = BMX160_CONF_ADDR
+        self.txbuf[1] = 0x02
+        with self.i2c_device as spi:
+            spi.write(self.txbuf, end=2)
+        
+        sleep(BMX160_DELAY)
+        
+        self.txbuf[0] = BMX160_NV_CONF_ADDR
+        self.txbuf[1] = 0x00  # BMX160_SPI_INTF
+        with self.i2c_device as spi:
+            spi.write(self.txbuf, end=2)
+        
+        sleep(BMX160_DELAY)
+        
+        self.init_accel()
+        self.init_gyro()
+        # self.init_mag()
+    
+    def init_accel(self):
+        # Set Power Mode
+        self.txbuf[0] = BMX160_COMMAND_REG_ADDR
+        self.txbuf[1] = BMX160_ACCEL_NORMAL_MODE
+        with self.i2c_device as spi:
+            spi.write(self.txbuf, end=2)
+        sleep(BMX160_DELAY)
+        # Set ODR and FSR
+        self.txbuf[0] = BMX160_ACCEL_CONFIG_ADDR
+        self.txbuf[1] = (BMX160_ACCEL_ODR_800HZ | (BMX160_ACCEL_BW_OSR2_AVG2 << 4)) & 0x7F
+        self.txbuf[2] = self.accel_range & 0x0F
+        with self.i2c_device as spi:
+            spi.write(self.txbuf, end=3)
+        sleep(BMX160_DELAY)
+        
+        print(bytes(self.txbuf))
+        for i in self.txbuf:
+            print("%6s" % (hex(i)), end='')
+        print('\n')
+        self.txbuf[0] = BMX160_ACCEL_CONFIG_ADDR
+        with self.i2c_device as spi:
+            spi.write(self.txbuf, end=1)
+            spi.readinto(self.rxbuf, end=2)
+        
+        for i in self.rxbuf:
+            print("%6s" % (hex(i)), end='')
+        print('\n')
+    
+    def init_gyro(self):
+        # Set Power Mode
+        self.txbuf[0] = BMX160_COMMAND_REG_ADDR
+        self.txbuf[1] = BMX160_GYRO_NORMAL_MODE
+        with self.i2c_device as spi:
+            spi.write(self.txbuf, end=2)
+        sleep(BMX160_DELAY)
+        # Set ODR and FSR
+        self.txbuf[0] = BMX160_GYRO_CONFIG_ADDR
+        self.txbuf[1] = (BMX160_GYRO_ODR_800HZ | (BMX160_GYRO_BW_OSR4 << 4)) & 0x3F
+        self.txbuf[2] = self.gyro_range & 0x07
+        with self.i2c_device as spi:
+            spi.write(self.txbuf, end=3)
+        sleep(BMX160_DELAY)
+    
+    def init_mag(self):
+        # Set Power Mode
+        self.txbuf[0] = BMX160_COMMAND_REG_ADDR & BMX160_SPI_WR_MASK
+        self.txbuf[1] = BMX160_MAG_NORMAL_MODE
+        with self.i2c_device as spi:
+            spi.write(self.txbuf, end=2)
+        
+        # Set ODR
+        self.txbuf[0] = BMX160_MAG_CONFIG_ADDR & BMX160_SPI_WR_MASK
+        self.txbuf[1] = BMX160_MAG_ODR_200HZ & 0x0F
+        with self.i2c_device as spi:
+            spi.write(self.txbuf, end=2)
+    
+    def read_accel(self):
+        self.txbuf[0] = BMX160_ACCEL_DATA_ADDR | BMX160_SPI_RD_MASK
+        with self.i2c_device as spi:
+            spi.write(self.txbuf, end=1)
+            sleep(BMX160_DELAY)
+            spi.readinto(self.rxbuf, end=6)
+        
+        self.accel[0:3] = unpack('<hhhh', bytes(self.rxbuf))[0:3]
+        self.accel[0] = self.accel[0] / self.accel_sens * 9.81
+        self.accel[1] = self.accel[1] / self.accel_sens * 9.81
+        self.accel[2] = self.accel[2] / self.accel_sens * 9.81
+        
+        return self.accel
+    
+    def read_gyro(self):
+        self.txbuf[0] = BMX160_GYRO_DATA_ADDR | BMX160_SPI_RD_MASK
+        with self.i2c_device as spi:
+            spi.write(self.txbuf, end=1)
+            sleep(BMX160_DELAY)
+            spi.readinto(self.rxbuf, end=6)
+        
+        self.gyro[0:3] = unpack('<hhhh', bytes(self.rxbuf))[0:3]
+        self.gyro[0] = self.gyro[0] / self.gyro_sens * 0.0174533
+        self.gyro[1] = self.gyro[1] / self.gyro_sens * 0.0174533
+        self.gyro[2] = self.gyro[2] / self.gyro_sens * 0.0174533
+        
+        return self.gyro
+    
+    def read_mag(self):
+        self.txbuf[0] = BMX160_MAG_DATA_ADDR | BMX160_SPI_RD_MASK
+        with self.i2c_device as spi:
+            spi.write(self.txbuf, end=1)
+            spi.readinto(self.rxbuf, end=6)
+        
+        self.mag, self.mag[1], self.mag[2] = unpack('<hhhh', bytes(self.rxbuf))[0:3]
+        self.mag[0] = self.mag[0] / self.mag_sens
+        self.mag[1] = self.mag[1] / self.mag_sens
+        self.mag[2] = self.mag[2] / self.mag_sens
+        
         return self.mag
 
